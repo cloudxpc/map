@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset='utf-8' />
+  <title>Test</title>
+  <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+  <script src='https://api.tiles.mapbox.com/mapbox-gl-js/v0.50.0/mapbox-gl.js'></script>
+  <script src='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-language/v0.10.0/mapbox-gl-language.js'></script>
+  <script src='https://npmcdn.com/@turf/turf/turf.min.js'></script>
+  <script src="https://cdn.bootcss.com/jquery/3.3.1/jquery.min.js"></script>
+  <link href='https://api.tiles.mapbox.com/mapbox-gl-js/v0.50.0/mapbox-gl.css' rel='stylesheet' />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 100%;
+    }
+
+    .overlay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id='map'></div>
+  <div class="overlay">
+    <button id="replay">Replay</button>
+  </div>
+  <script>
+    mapboxgl.accessToken = 'pk.eyJ1IjoiY2xvdWR4cGMiLCJhIjoiY2pvMzEyZW1yMHNkdTN2cGhmMmZxMDk2OSJ9.-W3Ume3TVXrvsWWCeTpksg';
+    var map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/streets-v9',
+      interactive: true,
+      attributionControl: false,
+      center: [117.17666, 39.13934],
+      zoom: 13,
+      // pitch: 60
+    });
+
+    map.addControl(new mapboxgl.GeolocateControl({
+      positionOptions: {
+        enableHighAccuracy: true
+      },
+      trackUserLocation: true
+    }));
+    map.addControl(new MapboxLanguage());
+
+    var add3DBuildingLayer = function() {
+      // Insert the layer beneath any symbol layer.
+      var layers = map.getStyle().layers;
+      var labelLayerId;
+      for (var i = 0; i < layers.length; i++) {
+        if (layers[i].type === 'symbol' && layers[i].layout['text-field']) {
+          labelLayerId = layers[i].id;
+          break;
+        }
+      }
+      map.addLayer({
+        'id': '3d-buildings',
+        'source': 'composite',
+        'source-layer': 'building',
+        'filter': ['==', 'extrude', 'true'],
+        'type': 'fill-extrusion',
+        'minzoom': 15,
+        'paint': {
+          'fill-extrusion-color': '#aaa',
+          // use an 'interpolate' expression to add a smooth transition effect to the
+          // buildings as the user zooms in
+          'fill-extrusion-height': [
+            "interpolate", ["linear"],
+            ["zoom"],
+            15, 0,
+            15.05, ["get", "height"]
+          ],
+          'fill-extrusion-base': [
+            "interpolate", ["linear"],
+            ["zoom"],
+            15, 0,
+            15.05, ["get", "min_height"]
+          ],
+          'fill-extrusion-opacity': .6
+        }
+      }, labelLayerId);
+    };
+
+    var lineManager = {
+      name: 'lines',
+      data: {},
+      add: function(key, value) {
+        this.data[key] = value;
+      },
+      remove: function(key) {
+        delete this.data[key];
+      },
+      toGeoJson: function() {
+        return turf.featureCollection(Object.keys(this.data).map(k => this.data[k]).reduce((a, c) => a.concat(c), []));
+      },
+      update: function() {
+        map.getSource(this.name).setData(this.toGeoJson());
+      },
+      init: function() {
+        map.addSource(this.name, {
+          "type": "geojson",
+          "data": this.toGeoJson()
+        });
+        map.addLayer({
+          'id': this.name,
+          'source': this.name,
+          'type': 'line',
+          'paint': {
+            'line-width': 4,
+            'line-color': ['get', 'color']
+          },
+          'layout': {
+            "line-cap": "round",
+            'line-join': 'round'
+          }
+        });
+      }
+    };
+
+    var pointManager = {
+      name: 'points',
+      data: {},
+      add: function(key, value) {
+        this.data[key] = value;
+      },
+      remove: function(key) {
+        delete this.data[key];
+      },
+      toGeoJson: function() {
+        return turf.featureCollection(Object.keys(this.data).map(k => this.data[k]));
+      },
+      update: function() {
+        map.getSource(this.name).setData(this.toGeoJson());
+      },
+      init: function() {
+        map.addSource(this.name, {
+          "type": "geojson",
+          "data": this.toGeoJson()
+        });
+        map.addLayer({
+          "id": this.name,
+          "source": this.name,
+          "type": "symbol",
+          "layout": {
+            "icon-image": ["get", "icon"],
+            "icon-rotate": ["get", "bearing"],
+            "icon-rotation-alignment": "map",
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true
+          }
+        });
+      }
+    };
+
+    var getRandomColor = function() {
+      var letters = '0123456789ABCDEF';
+      var color = '#';
+      for (var i = 0; i < 6; i++) {
+        color += letters[Math.floor(Math.random() * 16)];
+      }
+      return color;
+    };
+
+    var createCar = function(start, end) {
+      return {
+        name: 'car1',
+        start: start,
+        end: end,
+        resObj: null,
+        location: null,
+        isStopped: false,
+        currentStep: null,
+        nextStepIndex: 0,
+        speed: 50,
+        stepStartTime: 0,
+        goTime: 0,
+        arriveTime: 0,
+        updateRouteToView: function() {
+          var geojsonCollection = this.resObj.routes[0].legs[0].steps.map(s => {
+            var feature = turf.feature(s.geometry);
+            feature.properties.color = getRandomColor();
+            feature.properties.distance = s.distance;
+            feature.properties.duration = s.duration;
+            // feature.properties.maneuver = step.maneuver;
+            return feature;
+          });
+          lineManager.add(this.name, geojsonCollection);
+          lineManager.update();
+        },
+        updateLocationToView: function() {
+          pointManager.add(this.name, this.location);
+          pointManager.update();
+        },
+        nextStep: function() {
+          if (this.nextStepIndex < this.resObj.routes[0].legs[0].steps.length - 1) {
+            this.currentStep = this.resObj.routes[0].legs[0].steps[this.nextStepIndex++];
+            this.stepStartTime = Date.now();
+          } else {
+            this.arrive();
+          }
+        },
+        init: function() {
+          $.get('https://api.mapbox.com/directions/v5/mapbox/driving/' + this.start[0] + '%2C' + this.start[1] + '%3B' + this.end[0] + '%2C' + this.end[1] +
+            '?access_token=pk.eyJ1IjoiY2xvdWR4cGMiLCJhIjoiY2pvMzEyZW1yMHNkdTN2cGhmMmZxMDk2OSJ9.-W3Ume3TVXrvsWWCeTpksg&steps=true&geometries=geojson', (res) => {
+              this.resObj = res;
+              this.updateRouteToView();
+              this.go();
+              console.log(this);
+            });
+        },
+        move: function() {
+          if (this.isStopped) return;
+          var pastSec = (Date.now() - this.stepStartTime) / 1000;
+          var pastDistance = this.currentStep.distance / this.currentStep.duration * pastSec * this.speed;
+          var newPoint = turf.along(this.currentStep.geometry, pastDistance / 1000);
+          var bearing = turf.bearing(this.location, newPoint);
+          this.location.geometry.coordinates = newPoint.geometry.coordinates;
+          this.location.properties.bearing = bearing;
+          this.updateLocationToView();
+
+          if (pastDistance >= this.currentStep.distance) {
+            this.nextStep();
+          }
+        },
+        go: function() {
+          this.location = turf.point(this.resObj.waypoints[0].location);
+          this.location.properties.icon = "airport-15";
+          this.location.properties.bearing = 0;
+          this.updateLocationToView();
+          this.isStopped = false;
+          this.currentStep = null;
+          this.nextStepIndex = 0;
+          this.nextStep();
+          this.goTime = Date.now();
+          animate();
+        },
+        arrive: function() {
+          this.isStopped = true;
+          this.arriveTime = Date.now();
+          console.log((this.arriveTime - this.goTime) / 1000);
+        }
+      };
+    };
+
+    var car = createCar([117.19123, 39.15434], [117.17808, 39.12615]);
+
+    var animate = function() {
+      if (!car.isStopped) {
+        car.move();
+        requestAnimationFrame(animate);
+      }
+    };
+
+    map.on('load', function() {
+      add3DBuildingLayer();
+      lineManager.init();
+      pointManager.init();
+      car.init();
+    });
+
+    document.getElementById('replay').addEventListener('click', function() {
+      car.go();
+    });
+  </script>
+</body>
+
+</html>
