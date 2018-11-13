@@ -56,6 +56,17 @@
     }));
     map.addControl(new MapboxLanguage());
 
+    map.on('click', function(e) {
+      car.isStopped = true;
+      if ((car.start && car.end) || (!car.start && !car.end)) {
+        car.start = [e.lngLat.lng, e.lngLat.lat];
+        car.end = null;
+      } else {
+        car.end = [e.lngLat.lng, e.lngLat.lat];
+        car.init();
+      }
+    });
+
     var add3DBuildingLayer = function() {
       // Insert the layer beneath any symbol layer.
       var layers = map.getStyle().layers;
@@ -228,6 +239,11 @@
           this.updateLocationToView();
         },
         initMarker: function() {
+          if (this.marker) {
+            this.marker.remove();
+            this.marker = null;
+          }
+
           var el = document.createElement('div');
           el.style.backgroundImage = 'url(http://chittagongit.com//images/car-icon-top-view/car-icon-top-view-3.jpg)';
           el.style.backgroundRepeat = 'no-repeat';
@@ -239,8 +255,6 @@
           el.addEventListener('click', function() {
             window.alert('marker.properties.message');
           });
-
-          el.style.transform = 'rotate(30deg)';
 
           this.marker = new mapboxgl.Marker(el);
         },
@@ -270,7 +284,7 @@
           this.location.properties.bearing = bearing;
           this.updateLocationToView();
           this.marker.setLngLat(this.location.geometry.coordinates).addTo(map);
-          this.marker.getElement().style.transform = this.marker.getElement().style.transform + ' rotate(' + (bearing - 90) + 'deg)';
+          this.marker.getElement().style.transform = this.marker.getElement().style.transform + ' rotate(' + (bearing - 90 - map.getBearing()) + 'deg)';
 
           if (pastDistance >= this.currentStep.distance) {
             this.nextStep();
@@ -292,7 +306,7 @@
       };
     };
 
-    var car = createCar([117.19123, 39.15434], [117.17808, 39.12615]);
+    var car = createCar(); //[117.19123, 39.15434], [117.17808, 39.12615]
 
     var animate = function() {
       if (!car.isStopped) {
@@ -305,7 +319,6 @@
       add3DBuildingLayer();
       lineManager.init();
       pointManager.init();
-      car.init();
     });
 
     document.getElementById('replay').addEventListener('click', function() {
