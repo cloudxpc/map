@@ -157,6 +157,7 @@
           "layout": {
             "icon-image": ["get", "icon"],
             "icon-rotate": ["get", "bearing"],
+            "icon-size": ["get", "size"],
             "icon-rotation-alignment": "map",
             "icon-allow-overlap": true,
             "icon-ignore-placement": true
@@ -182,21 +183,24 @@
         resObj: null,
         location: null,
         isStopped: false,
+        stepCollection: [],
         currentStep: null,
         nextStepIndex: 0,
         speed: 50,
         stepStartTime: 0,
         goTime: 0,
         arriveTime: 0,
+        marker: null,
         updateRouteToView: function() {
-          var geojsonCollection = this.resObj.routes[0].legs[0].steps.map(s => {
+          var color = getRandomColor();
+          var geojsonCollection = this.stepCollection.map(s => {
             var feature = turf.feature(s.geometry);
-            feature.properties.color = getRandomColor();
+            feature.properties.color = color;
             feature.properties.distance = s.distance;
             feature.properties.duration = s.duration;
-            // feature.properties.maneuver = step.maneuver;
             return feature;
-          });
+          })
+
           lineManager.add(this.name, geojsonCollection);
           lineManager.update();
         },
@@ -205,18 +209,53 @@
           pointManager.update();
         },
         nextStep: function() {
-          if (this.nextStepIndex < this.resObj.routes[0].legs[0].steps.length - 1) {
-            this.currentStep = this.resObj.routes[0].legs[0].steps[this.nextStepIndex++];
+          if (this.nextStepIndex < this.stepCollection.length) {
+            this.currentStep = this.stepCollection[this.nextStepIndex++];
             this.stepStartTime = Date.now();
           } else {
             this.arrive();
           }
         },
+        initRoute: function() {
+          this.stepCollection = this.resObj.trips[0].legs.map(l => l.steps.slice(0, l.steps.length - 1)).reduce((a, c) => a.concat(c), []);
+          this.updateRouteToView();
+        },
+        initLocation: function() {
+          this.location = turf.point(this.resObj.waypoints[0].location);
+          this.location.properties.icon = "airport-15";
+          this.location.properties.bearing = 0;
+          this.location.properties.size = 1;
+          this.updateLocationToView();
+        },
+        initMarker: function() {
+          var el = document.createElement('div');
+          el.style.backgroundImage = 'url(http://chittagongit.com//images/car-icon-top-view/car-icon-top-view-3.jpg)';
+          el.style.backgroundRepeat = 'no-repeat';
+          el.style.backgroundPosition = 'center';
+          el.style.backgroundSize = '32px 22px';
+          el.style.width = '32px';
+          el.style.height = '22px';
+
+          el.addEventListener('click', function() {
+            window.alert('marker.properties.message');
+          });
+
+          el.style.transform = 'rotate(30deg)';
+
+          this.marker = new mapboxgl.Marker(el);
+        },
+        initMarkerLocation: function() {
+          this.marker.setLngLat(this.location.geometry.coordinates).addTo(map);
+        },
         init: function() {
-          $.get('https://api.mapbox.com/directions/v5/mapbox/driving/' + this.start[0] + '%2C' + this.start[1] + '%3B' + this.end[0] + '%2C' + this.end[1] +
-            '?access_token=pk.eyJ1IjoiY2xvdWR4cGMiLCJhIjoiY2pvMzEyZW1yMHNkdTN2cGhmMmZxMDk2OSJ9.-W3Ume3TVXrvsWWCeTpksg&steps=true&geometries=geojson', (res) => {
+          $.get('https://api.mapbox.com/optimized-trips/v1/mapbox/driving/' + this.start[0] + '%2C' + this.start[1] + '%3B' + this.end[0] + '%2C' + this.end[1] +
+            '?access_token=pk.eyJ1IjoiY2xvdWR4cGMiLCJhIjoiY2pvMzEyZW1yMHNkdTN2cGhmMmZxMDk2OSJ9.-W3Ume3TVXrvsWWCeTpksg' +
+            '&source=first&destination=last&roundtrip=false&steps=true&geometries=geojson', (res) => {
               this.resObj = res;
-              this.updateRouteToView();
+              this.initRoute();
+              this.initLocation();
+              this.initMarker();
+              this.initMarkerLocation();
               this.go();
               console.log(this);
             });
@@ -230,16 +269,14 @@
           this.location.geometry.coordinates = newPoint.geometry.coordinates;
           this.location.properties.bearing = bearing;
           this.updateLocationToView();
+          this.marker.setLngLat(this.location.geometry.coordinates).addTo(map);
+          this.marker.getElement().style.transform = this.marker.getElement().style.transform + ' rotate(' + (bearing - 90) + 'deg)';
 
           if (pastDistance >= this.currentStep.distance) {
             this.nextStep();
           }
         },
         go: function() {
-          this.location = turf.point(this.resObj.waypoints[0].location);
-          this.location.properties.icon = "airport-15";
-          this.location.properties.bearing = 0;
-          this.updateLocationToView();
           this.isStopped = false;
           this.currentStep = null;
           this.nextStepIndex = 0;
@@ -272,6 +309,8 @@
     });
 
     document.getElementById('replay').addEventListener('click', function() {
+      car.initLocation();
+      car.initMarkerLocation();
       car.go();
     });
   </script>
